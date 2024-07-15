@@ -115,13 +115,17 @@ def process_frame(frame, net, output_layers, classes, cascades):
                 color = (0, 255, 255)  # Yellow for person boxes
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
                 draw_label(frame, f'{label}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
+            else:
+                color = (0, 0, 255)  # Red for other objects
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                draw_label(frame, f'{label}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
 
     filtered_faces = detect_faces(frame, person_boxes, cascades, min_confidence=1.0)
 
     for (x, y, w, h, confidence, cascade_name) in filtered_faces:
         color = (0, 255, 0)  # Green for face boxes
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-        draw_label(frame, f'{cascade_name}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
+        draw_label(frame, 'Face', (x, y), (0, 0, 0), (255, 255, 255))
 
     return frame
 
