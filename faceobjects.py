@@ -7,8 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Load YOLO
 def load_yolo():
-    yolo_path = os.path.join('yolo', 'yolov4.cfg')
-    weights_path = os.path.join('yolo', 'yolov4.weights')
+    yolo_path = os.path.join('yolo', 'yolov4-tiny.cfg')
+    weights_path = os.path.join('yolo', 'yolov4-tiny.weights')
     names_path = os.path.join('yolo', 'coco.names')
     
     net = cv2.dnn.readNetFromDarknet(yolo_path, weights_path)
@@ -33,8 +33,8 @@ def load_cascades(cascade_dir):
 
 def draw_label(image, text, pos, bg_color, text_color):
     font_face = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 0.8
-    thickness = 2
+    scale = 0.6
+    thickness = 1
     margin = 5
 
     size = cv2.getTextSize(text, font_face, scale, thickness)
@@ -78,7 +78,7 @@ def detect_faces(frame, person_boxes, cascades, min_confidence=1.0):
     for (x, y, w, h) in person_boxes:
         person_roi = frame[y:y+h, x:x+w]
         for name, cascade in cascades.items():
-            detected = cascade.detectMultiScale(person_roi, scaleFactor=1.1, minNeighbors=10, minSize=(30, 30))
+            detected = cascade.detectMultiScale(person_roi, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
             for (fx, fy, fw, fh) in detected:
                 face_confidence = 1.0  # Assuming equal weightage for all cascades
                 faces.append((x + fx, y + fy, fw, fh, face_confidence, name))
