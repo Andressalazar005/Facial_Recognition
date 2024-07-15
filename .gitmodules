@@ -1,3 +1,0 @@
-[submodule "YOLOV4"]
-	path = YOLOV4
-	url = https://github.com/AlexeyAB/darknet.git
