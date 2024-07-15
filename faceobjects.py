@@ -17,10 +17,13 @@ def load_yolo():
 
     with open(names_path, "r") as f:
         classes = [line.strip() for line in f.readlines()]
-    
+
+    # Extract model name from the config file name
+    model_name = os.path.basename(yolo_path).split('.')[0]
+
     layer_names = net.getLayerNames()
     output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-    return net, classes, output_layers
+    return net, classes, output_layers, model_name
 
 # Load Haar cascades
 def load_cascades(cascade_dir):
@@ -31,16 +34,11 @@ def load_cascades(cascade_dir):
             cascades[cascade_name] = cv2.CascadeClassifier(os.path.join(cascade_dir, filename))
     return cascades
 
-def draw_label(image, text, pos, bg_color, text_color):
+def draw_label(image, text, pos, bg_color, text_color, scale=0.6, thickness=1):
     font_face = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 0.6
-    thickness = 1
-    margin = 5
-
     size = cv2.getTextSize(text, font_face, scale, thickness)
-    end_x = pos[0] + size[0][0] + margin
-    end_y = pos[1] - size[0][1] - margin
-
+    end_x = pos[0] + size[0][0] + 5
+    end_y = pos[1] - size[0][1] - 5
     cv2.rectangle(image, pos, (end_x, end_y), bg_color, cv2.FILLED)
     cv2.putText(image, text, (pos[0], pos[1] - 5), font_face, scale, text_color, thickness, cv2.LINE_AA)
 
@@ -130,11 +128,11 @@ def process_frame(frame, net, output_layers, classes, cascades):
     return frame
 
 def main():
-    net, classes, output_layers = load_yolo()
+    net, classes, output_layers, model_name = load_yolo()
     cascades = load_cascades('cascades')
 
     sct = mss.mss()
-    monitor = sct.monitors[1]
+    monitor = sct.monitors[2]
 
     with ThreadPoolExecutor() as executor:
         while True:
@@ -148,7 +146,11 @@ def main():
             processed_frame = future.result()
 
             fps = 1.0 / (time.time() - start_time)
-            draw_label(processed_frame, f'FPS: {fps:.2f}', (10, 30), (0, 0, 0), (255, 255, 255))
+            draw_label(processed_frame, f'FPS: {fps:.2f}', (10, 30), (0, 0, 0), (255, 255, 255), scale=.8, thickness=1)
+
+            # Draw model name at the top center of the frame
+            frame_height, frame_width = processed_frame.shape[:2]
+            draw_label(processed_frame, model_name, (frame_width // 2 - 100, 50), (0, 0, 0), (255, 255, 255), scale=2.4, thickness=4)
 
             cv2.imshow('Screen', processed_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
