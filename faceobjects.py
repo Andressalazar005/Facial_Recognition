@@ -6,9 +6,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 # Load YOLO
-def load_yolo():
-    yolo_path = os.path.join('yolo', 'yolov4-tiny.cfg')
-    weights_path = os.path.join('yolo', 'yolov4-tiny.weights')
+def load_yolo(model_name):
+    yolo_path = os.path.join('yolo', f'{model_name}.cfg')
+    weights_path = os.path.join('yolo', f'{model_name}.weights')
     names_path = os.path.join('yolo', 'coco.names')
     
     net = cv2.dnn.readNetFromDarknet(yolo_path, weights_path)
@@ -17,9 +17,6 @@ def load_yolo():
 
     with open(names_path, "r") as f:
         classes = [line.strip() for line in f.readlines()]
-
-    # Extract model name from the config file name
-    model_name = os.path.basename(yolo_path).split('.')[0]
 
     layer_names = net.getLayerNames()
     output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
@@ -98,7 +95,7 @@ def detect_faces(frame, person_boxes, cascades, min_confidence=1.0):
     filtered_faces = [faces[i] for i in face_indexes.flatten()]
     return filtered_faces
 
-def process_frame(frame, net, output_layers, classes, cascades):
+def process_frame(frame, net, output_layers, classes, cascades, model_name):
     height, width, channels = frame.shape
     boxes, confidences, class_ids, indexes = detect_objects(frame, net, output_layers)
 
@@ -125,38 +122,61 @@ def process_frame(frame, net, output_layers, classes, cascades):
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
         draw_label(frame, 'Face', (x, y), (0, 0, 0), (255, 255, 255))
 
+    # Draw model name at the top center of the frame
+    frame_height, frame_width = frame.shape[:2]
+    draw_label(frame, model_name, (frame_width // 2 - 200, 30), (0, 0, 0), (255, 255, 255), scale=1.2, thickness=2)
+
     return frame
 
+def update_model(model_name):
+    global net, classes, output_layers, current_model_name
+    net, classes, output_layers, current_model_name = load_yolo(model_name)
+
+def model_selector(state, model_name):
+    if state == 1:
+        update_model(model_name)
+
 def main():
-    net, classes, output_layers, model_name = load_yolo()
+    global net, classes, output_layers, current_model_name, models
+    models = [filename.split('.')[0] for filename in os.listdir('yolo') if filename.endswith('.cfg')]
+
+    # Initialize with the first model
+    net, classes, output_layers, current_model_name = load_yolo(models[0])
     cascades = load_cascades('cascades')
 
     sct = mss.mss()
     monitor = sct.monitors[2]
 
-    with ThreadPoolExecutor() as executor:
-        while True:
-            screenshot = sct.grab(monitor)
-            frame = np.array(screenshot)
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    def start_detection():
+        with ThreadPoolExecutor() as executor:
+            while True:
+                screenshot = sct.grab(monitor)
+                frame = np.array(screenshot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
-            start_time = time.time()
+                start_time = time.time()
 
-            future = executor.submit(process_frame, frame, net, output_layers, classes, cascades)
-            processed_frame = future.result()
+                future = executor.submit(process_frame, frame, net, output_layers, classes, cascades, current_model_name)
+                processed_frame = future.result()
 
-            fps = 1.0 / (time.time() - start_time)
-            draw_label(processed_frame, f'FPS: {fps:.2f}', (10, 30), (0, 0, 0), (255, 255, 255), scale=.8, thickness=1)
+                fps = 1.0 / (time.time() - start_time)
+                draw_label(processed_frame, f'FPS: {fps:.2f}', (10, 30), (0, 0, 0), (255, 255, 255), scale=1.2, thickness=2)
 
-            # Draw model name at the top center of the frame
-            frame_height, frame_width = processed_frame.shape[:2]
-            draw_label(processed_frame, model_name, (frame_width // 2 - 100, 50), (0, 0, 0), (255, 255, 255), scale=2.4, thickness=4)
+                cv2.imshow('Screen', processed_frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
 
-            cv2.imshow('Screen', processed_frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+        cv2.destroyAllWindows()
 
-    cv2.destroyAllWindows()
+    # Create OpenCV window
+    cv2.namedWindow('Screen')
+
+    # Create buttons for each model
+    for model in models:
+        cv2.createButton(model, model_selector, model, cv2.QT_RADIOBOX, 0)
+
+    # Start detection
+    start_detection()
 
 if __name__ == "__main__":
     main()
