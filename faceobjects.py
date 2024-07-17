@@ -5,24 +5,41 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-# Load YOLO
+# Global variables
+model_var = None
+net = None
+classes = None
+output_layers = None
+cascades = None
+model_names = []
+acceleration = "CPU"
+
 def load_yolo(model_name):
+    global net, classes, output_layers
+
     yolo_path = os.path.join('yolo', f'{model_name}.cfg')
     weights_path = os.path.join('yolo', f'{model_name}.weights')
     names_path = os.path.join('yolo', 'coco.names')
-    
+
     net = cv2.dnn.readNetFromDarknet(yolo_path, weights_path)
-    net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-    net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+    if acceleration == "GPU":
+        try:
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+        except Exception as e:
+            print(f"Failed to set CUDA backend: {e}")
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+    else:
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
     with open(names_path, "r") as f:
         classes = [line.strip() for line in f.readlines()]
 
     layer_names = net.getLayerNames()
     output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-    return net, classes, output_layers, model_name
 
-# Load Haar cascades
 def load_cascades(cascade_dir):
     cascades = {}
     for filename in os.listdir(cascade_dir):
@@ -31,13 +48,16 @@ def load_cascades(cascade_dir):
             cascades[cascade_name] = cv2.CascadeClassifier(os.path.join(cascade_dir, filename))
     return cascades
 
-def draw_label(image, text, pos, bg_color, text_color, scale=0.6, thickness=1):
+def draw_label(image, text, pos, bg_color, text_color, font_scale=0.5, thickness=1):
     font_face = cv2.FONT_HERSHEY_SIMPLEX
-    size = cv2.getTextSize(text, font_face, scale, thickness)
-    end_x = pos[0] + size[0][0] + 5
-    end_y = pos[1] - size[0][1] - 5
+    margin = 5
+
+    size = cv2.getTextSize(text, font_face, font_scale, thickness)
+    end_x = pos[0] + size[0][0] + margin
+    end_y = pos[1] - size[0][1] - margin
+
     cv2.rectangle(image, pos, (end_x, end_y), bg_color, cv2.FILLED)
-    cv2.putText(image, text, (pos[0], pos[1] - 5), font_face, scale, text_color, thickness, cv2.LINE_AA)
+    cv2.putText(image, text, (pos[0], pos[1] - 5), font_face, font_scale, text_color, thickness, cv2.LINE_AA)
 
 def detect_objects(frame, net, output_layers):
     height, width, channels = frame.shape
@@ -73,7 +93,7 @@ def detect_faces(frame, person_boxes, cascades, min_confidence=1.0):
     for (x, y, w, h) in person_boxes:
         person_roi = frame[y:y+h, x:x+w]
         for name, cascade in cascades.items():
-            detected = cascade.detectMultiScale(person_roi, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            detected = cascade.detectMultiScale(person_roi, scaleFactor=1.1, minNeighbors=10, minSize=(30, 30))
             for (fx, fy, fw, fh) in detected:
                 face_confidence = 1.0  # Assuming equal weightage for all cascades
                 faces.append((x + fx, y + fy, fw, fh, face_confidence, name))
@@ -95,7 +115,7 @@ def detect_faces(frame, person_boxes, cascades, min_confidence=1.0):
     filtered_faces = [faces[i] for i in face_indexes.flatten()]
     return filtered_faces
 
-def process_frame(frame, net, output_layers, classes, cascades, model_name):
+def process_frame(frame, net, output_layers, classes, cascades):
     height, width, channels = frame.shape
     boxes, confidences, class_ids, indexes = detect_objects(frame, net, output_layers)
 
@@ -110,72 +130,74 @@ def process_frame(frame, net, output_layers, classes, cascades, model_name):
                 color = (0, 255, 255)  # Yellow for person boxes
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
                 draw_label(frame, f'{label}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
-            else:
-                color = (0, 0, 255)  # Red for other objects
-                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-                draw_label(frame, f'{label}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
 
     filtered_faces = detect_faces(frame, person_boxes, cascades, min_confidence=1.0)
 
     for (x, y, w, h, confidence, cascade_name) in filtered_faces:
         color = (0, 255, 0)  # Green for face boxes
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-        draw_label(frame, 'Face', (x, y), (0, 0, 0), (255, 255, 255))
-
-    # Draw model name at the top center of the frame
-    frame_height, frame_width = frame.shape[:2]
-    draw_label(frame, model_name, (frame_width // 2 - 200, 30), (0, 0, 0), (255, 255, 255), scale=1.2, thickness=2)
+        draw_label(frame, f'Face', (x, y), (0, 0, 0), (255, 255, 255))
 
     return frame
 
-def update_model(model_name):
-    global net, classes, output_layers, current_model_name
-    net, classes, output_layers, current_model_name = load_yolo(model_name)
-
-def model_selector(state, model_name):
-    if state == 1:
-        update_model(model_name)
-
-def main():
-    global net, classes, output_layers, current_model_name, models
-    models = [filename.split('.')[0] for filename in os.listdir('yolo') if filename.endswith('.cfg')]
-
-    # Initialize with the first model
-    net, classes, output_layers, current_model_name = load_yolo(models[0])
-    cascades = load_cascades('cascades')
-
+def start_detection():
     sct = mss.mss()
     monitor = sct.monitors[2]
 
-    def start_detection():
-        with ThreadPoolExecutor() as executor:
-            while True:
-                screenshot = sct.grab(monitor)
-                frame = np.array(screenshot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    with ThreadPoolExecutor() as executor:
+        while True:
+            screenshot = sct.grab(monitor)
+            frame = np.array(screenshot)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
-                start_time = time.time()
+            start_time = time.time()
 
-                future = executor.submit(process_frame, frame, net, output_layers, classes, cascades, current_model_name)
-                processed_frame = future.result()
+            future = executor.submit(process_frame, frame, net, output_layers, classes, cascades)
+            processed_frame = future.result()
 
-                fps = 1.0 / (time.time() - start_time)
-                draw_label(processed_frame, f'FPS: {fps:.2f}', (10, 30), (0, 0, 0), (255, 255, 255), scale=1.2, thickness=2)
+            fps = 1.0 / (time.time() - start_time)
+            draw_label(processed_frame, f'FPS: {fps:.2f}', (10, 50), (0, 0, 0), (255, 255, 255), font_scale=1.4, thickness=1)
+            draw_label(processed_frame, f'Model: {model_var}', (processed_frame.shape[1] // 2 - 300, 50), (0, 0, 0), (255, 255, 255), font_scale=1.4, thickness=1)
+            draw_label(processed_frame, f'Acceleration: {acceleration}', (processed_frame.shape[1] - 500, 50), (0, 0, 0), (255, 255, 255), font_scale=1.4, thickness=1)
 
-                cv2.imshow('Screen', processed_frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+            cv2.imshow('Screen', processed_frame)
 
-        cv2.destroyAllWindows()
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord('m'):
+                switch_model()
+            elif key == ord('a'):
+                switch_acceleration()
+
+    cv2.destroyAllWindows()
+
+def switch_model():
+    global model_var, model_names
+    current_index = model_names.index(model_var)
+    next_index = (current_index + 1) % len(model_names)
+    model_var = model_names[next_index]
+    load_yolo(model_var)
+
+def switch_acceleration():
+    global acceleration
+    acceleration = "GPU" if acceleration == "CPU" else "CPU"
+    load_yolo(model_var)
+
+def main():
+    global model_var, cascades, model_names, acceleration
+
+    # Initialize cascades
+    cascades = load_cascades('cascades')
+
+    # Initialize YOLO
+    model_names = [filename.split('.')[0] for filename in os.listdir('yolo') if filename.endswith('.cfg')]
+    model_var = model_names[0]
+    load_yolo(model_var)
 
     # Create OpenCV window
     cv2.namedWindow('Screen')
 
-    # Create buttons for each model
-    for model in models:
-        cv2.createButton(model, model_selector, model, cv2.QT_RADIOBOX, 0)
-
-    # Start detection
     start_detection()
 
 if __name__ == "__main__":
