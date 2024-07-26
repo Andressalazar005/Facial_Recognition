@@ -6,8 +6,9 @@ dependencies:
   - opencv
   - numpy
   - dlib
-  - tkinter
   - pip
   - pip:
     - face_recognition
     - mss
+    - tk
+
