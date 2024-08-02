@@ -74,7 +74,7 @@ def detect_objects(frame, net, output_layers):
             scores = detection[5:]
             class_id = np.argmax(scores)
             confidence = scores[class_id]
-            if confidence > 0.5:
+            if confidence > 0.1:
                 center_x = int(detection[0] * width)
                 center_y = int(detection[1] * height)
                 w = int(detection[2] * width)
@@ -120,16 +120,26 @@ def process_frame(frame, net, output_layers, classes, cascades):
     boxes, confidences, class_ids, indexes = detect_objects(frame, net, output_layers)
 
     person_boxes = []
+    vehicle_box =[]
     if len(indexes) > 0:
         for i in indexes.flatten():
             x, y, w, h = boxes[i]
             label = str(classes[class_ids[i]])
             confidence = confidences[i]
             if label == "person":
-                person_boxes.append((x, y, w, h))
                 color = (0, 255, 255)  # Yellow for person boxes
-                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-                draw_label(frame, f'{label}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
+                person_boxes.append((x, y, w, h))
+            elif label in ("car", "bicycle", "truck", "bus"):
+                color = (128,0,128) #purple for vehicles
+                vehicle_box.append((x,y,w,h))
+            else:
+                color = (0, 0, 255)  # Red for other objects
+
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            draw_label(frame, f'{label}: {confidence:.2f}', (x, y), (0, 0, 0), (255, 255, 255))
+
+    # Debug print to check if person boxes are being detected
+    #print(f'Person boxes: {person_boxes}')
 
     filtered_faces = detect_faces(frame, person_boxes, cascades, min_confidence=1.0)
 
